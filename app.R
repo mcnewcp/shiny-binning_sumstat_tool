@@ -80,7 +80,7 @@ server <- shinyServer(function(input, output, session) {
             temp %>%
                 filter(is_max) %>%
                 select(start_time, end_time, max_value, time_of_max_value = !!sym(input$date_time_col)),
-            statDF %>%
+            temp %>%
                 filter(is_min) %>%
                 select(start_time, end_time, min_value, time_of_min_value = !!sym(input$date_time_col)),
             by = c("start_time", "end_time")
