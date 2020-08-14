@@ -5,6 +5,7 @@
 ###         Last edited by:     Coy McNew           2020-08-11
 
 library(shiny)
+library(shinyTime)
 library(DT)
 library(tidyverse)
 library(lubridate)
@@ -26,12 +27,15 @@ ui <- shinyUI(fluidPage(
                          selectInput('sheet_name', 'Sheet Name:', ""),
                          selectInput('date_time_col', 'Date Time Column:', ""),
                          selectInput('value_col', 'Value Column:', ""),
-                         numericInput('bin_min', 'Bin Width (minutes)', 15, 1, 2400, step = 1),
+                         numericInput('bin_min', 'Bin Width (minutes):', 15, 1, 2400, step = 1),
+                         dateInput('start_date', 'Start Date:'),
+                         timeInput('start_time', 'Start Time:'),
                          actionButton('calculate', 'GO!', icon("calculator"))
                          
                      ),
                      mainPanel(
                          dataTableOutput('table')
+                         # verbatimTextOutput('debug')
                      )
                  )
         )
@@ -57,11 +61,61 @@ server <- shinyServer(function(input, output, session) {
                               choices = names(values$df_data), selected = names(values$df_data)[2])
         }
     })
+    observeEvent(input$date_time_col, {
+        updateDateInput(session, inputId = 'start_date', label = 'Start Date:',
+                        value = tryCatch(
+                            {
+                                values$df_data %>% 
+                                    pull(!!sym(input$date_time_col)) %>% 
+                                    min() %>% convertToDateTime() %>%
+                                    date()
+                            },
+                            error = function(cond) {
+                                print("start_date error")
+                                return(NA)
+                            },
+                            warnining = function(cond) {
+                                print("start_date warning")
+                                return(NA)
+                            }
+                            
+                        )
+        )
+        updateTimeInput(session, inputId = 'start_time', label = 'Start Time:',
+                        value = tryCatch(
+                            {
+                                values$df_data %>% 
+                                    pull(!!sym(input$date_time_col)) %>% 
+                                    min() %>% convertToDateTime() %>%
+                                    floor_date("15 minutes")
+                            },
+                            error = function(cond) {
+                                print("start_time error")
+                                return(NULL)
+                            },
+                            warnining = function(cond) {
+                                print("start_time warning")
+                                return(NULL)
+                            }
+                            
+                        ))
+    })
     observeEvent(input$calculate, {
         temp <- values$df_data %>%
             select(!!sym(input$date_time_col), !!sym(input$value_col)) %>%
             # #fix date time
             mutate_at(vars(!!sym(input$date_time_col)), convertToDateTime) %>%
+            #add na row at start_date_time_selection for binning
+            bind_rows(
+                tibble(
+                    !!sym(input$date_time_col) := ymd_hms(
+                        paste0(
+                            as.character(input$start_date), " ", hour(input$start_time), ":", minute(input$start_time), ":", second(input$start_time)
+                        ), tz = tz(input$start_time)
+                    ), 
+                    !!sym(input$value_col) := NA)
+            ) %>% 
+            arrange(!!sym(input$date_time_col)) %>%
             #bin data
             mutate(start_time = cut(!!sym(input$date_time_col), breaks = paste(input$bin_min, "mins"))) %>%
             #convert to date time
@@ -69,7 +123,7 @@ server <- shinyServer(function(input, output, session) {
             mutate(end_time = start_time + minutes(input$bin_min)) %>%
             #generate stats grouped by bin start time
             group_by(start_time) %>%
-            mutate(max_value = max(!!sym(input$value_col)), min_value = min(!!sym(input$value_col))) %>%
+            mutate(max_value = max(!!sym(input$value_col), na.rm = TRUE), min_value = min(!!sym(input$value_col), na.rm = TRUE)) %>%
             ungroup() %>%
             #label rows as max or min
             mutate(
@@ -99,10 +153,10 @@ server <- shinyServer(function(input, output, session) {
             buttons = c('csv', 'excel', 'pdf'),
             columnDefs = list(list(className = 'dt-center')),
             lengthMenu = c(10, 20, 30),
-            pageLength = 15)
+            pageLength = 15),
+        server = FALSE
     )
     # output$debug <- renderPrint(
-    #     cat(paste(values$file_path, "\nHello World! ", values$n))
     # )
 })
 
